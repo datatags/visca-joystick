@@ -7,6 +7,11 @@ from config import ips, sensitivity_tables, help_text, Camera, long_press_time
 from startup_shutdown import shut_down, ask_to_configure
 
 import inputs
+from threading import Thread, Lock, Event
+from queue import Queue
+from collections import namedtuple
+
+FakeEvent = namedtuple("FakeEvent", "ev_type code state")
 
 invert_tilt = True
 cam = None
@@ -14,6 +19,42 @@ joystick = None
 button_hold_trackers = []
 far_focus_down = False
 near_focus_down = False
+pan = 0
+tilt = 0
+event_queue = Queue()
+axis_updated = Event()
+
+class AxisPosition:
+    def __init__(self) -> None:
+        self.lock = Lock()
+        self.x = 0
+        self.changed = False
+    
+    def set(self, x) -> None:
+        if self.x != x:
+            with self.lock:
+                self.changed = True
+                self.x = x
+    
+    def get(self) -> int:
+        with self.lock:
+            return self.x
+    
+    def changed_and_reset(self) -> bool:
+        with self.lock:
+            if self.changed:
+                self.changed = False
+                return True
+            return False
+
+positions = {
+    'ABS_X': AxisPosition(),
+    'ABS_Y': AxisPosition(),
+    'ABS_Z': AxisPosition(),
+    'ABS_RX': AxisPosition(),
+    'ABS_RY': AxisPosition(),
+    'ABS_RZ': AxisPosition(),
+}
 
 class ButtonHoldTracker:
     def __init__(self, code, value=1) -> None:
@@ -63,17 +104,19 @@ class Movement:
         elif event.code.endswith("X") or event.code.endswith("Y"):
             value /= 32768
 
-        if self.invert:
-                value *= -1
-        if value < 0.1:
+        if abs(value) < 0.1:
             value = 0
         else:
             value = self.convert_to_sensitivity(value)
+            if self.invert:
+                value *= -1
 
         if self.action == "pan":
-            cam.pan(value)
+            global pan
+            pan = value
         elif self.action == "tilt":
-            cam.tilt(value)
+            global tilt
+            tilt = value
         elif self.action == "zoom":
             cam.zoom(value)
 
@@ -103,8 +146,12 @@ class Focus:
         if near_focus_down and far_focus_down:
             self.toggle_focus_mode()
             return
-        
-        if event.state == 1 or cam.get_focus_mode() == 'auto':
+
+        if cam.get_focus_mode() == 'auto':
+            return
+
+        if event.state == 0:
+            cam.manual_focus(0)
             return
 
         if self.ignore_next:
@@ -139,21 +186,26 @@ class Preset:
             elif event.state == -1:
                 self.negative_tracker.set()
             return
+        self.check_held()
+        positive = self.positive_tracker.is_set()
+        negative = self.negative_tracker.is_set()
+        if not positive and not negative:
+            return
         self.positive_tracker.reset()
         self.negative_tracker.reset()
         if self.ignore_next:
             self.ignore_next = False
             return
-        if event.state == -1:
+        if negative:
             cam.recall_preset(self.preset_negative)
-        elif event.state == 1:
+        elif positive:
             cam.recall_preset(self.preset_positive)
     
     def check_held(self):
         if self.positive_tracker.is_long_press():
-            cam.set_preset(self.preset_positive)
+            cam.save_preset(self.preset_positive)
         elif self.negative_tracker.is_long_press():
-            cam.set_preset(self.preset_negative)
+            cam.save_preset(self.preset_negative)
         else:
             return
         self.ignore_next = True
@@ -162,7 +214,7 @@ class ExitAction:
     def run(self, event) -> None:
         if event.state == 1:
             return
-        shut_down(joystick, cam)
+        shut_down(cam)
 
 class InvertTilt:
     def run(self, event) -> None:
@@ -173,9 +225,9 @@ class InvertTilt:
         print("Invert tilt: " + str(invert_tilt))
 
 mappings = {
-    'ABS_X': Movement('pan'),
+    'ABS_X': Movement('pan', invert=True),
     'ABS_Y': Movement('tilt'),
-    'ABS_Z': Movement('zoom'),
+    'ABS_Z': Movement('zoom', invert=True),
     'ABS_RZ': Movement('zoom'),
     'BTN_TL': Focus('near'),
     'BTN_TR': Focus('far'),
@@ -195,13 +247,6 @@ mappings = {
 #     'preset': {11: 8, 12: 9, 13: 10, 14: 11},
 #     'other': {'exit': 6, 'invert_tilt': 7, 'configure': 3}
 # }
-
-def joystick_init():
-    """Initializes the gamepad.
-    """
-    global joystick, joystick_reset_time
-
-    joystick = inputs.get_gamepad()
 
 def connect_to_camera(cam_index) -> Camera:
     """Connects to the camera specified by cam_index and returns it"""
@@ -225,24 +270,39 @@ def connect_to_camera(cam_index) -> Camera:
 
 def main_loop():
     while True:
-        for event in joystick:
-            if event.ev_type == "Sync":
-                continue
+        while not event_queue.empty():
+            event = event_queue.get_nowait()
             if event.code in mappings:
                 mappings[event.code].run(event)
+            else:
+                print(f"Unmapped key {event.code} {event.state}")
+        for key,position in positions.items():
+            if position.changed_and_reset() and key in mappings:
+                mappings[key].run(FakeEvent("Absolute", key, positions[key].get()))
+        cam.pantilt(pan, tilt)
+        axis_updated.clear()
+            
         time.sleep(0.03)
 
+def axis_tracker():
+    while True:
+        for event in inputs.get_gamepad():
+            if event.ev_type == "Sync":
+                continue
+            elif event.ev_type == "Absolute":
+                if event.code in positions:
+                    positions[event.code].set(event.state)
+                    axis_updated.set()
+                    continue
+            event_queue.put(event)
 
 if __name__ == "__main__":
     print('Welcome to VISCA Joystick!')
-    joystick_init()
     print()
     print(help_text)
-    ask_to_configure(joystick)
+    ask_to_configure()
     cam = connect_to_camera(0)
+    axis_tracker_thread = Thread(target=axis_tracker, daemon=True)
+    axis_tracker_thread.start()
 
-    while True:
-        try:
-            main_loop()
-        except Exception as exc:
-            print(exc)
+    main_loop()

@@ -1,16 +1,17 @@
 import time
+import inputs
 
 from visca_over_ip import Camera
 
 from config import ips
 
 
-def ask_to_configure(joystick):
+def ask_to_configure():
     """Allows the user to configure the cameras or skip this step
     If the user chooses to configure the cameras, they are powered on and preset 9 is recalled
     """
     print('Press Y to configure cameras or any other button to skip')
-    for event in joystick:
+    for event in inputs.get_gamepad():
         if event.ev_type == "Key":
             if event.code == "BTN_NORTH":
                 configure()
@@ -43,7 +44,7 @@ def shut_down(joystick, current_camera: Camera):
         current_camera.close_connection()
 
     print('Press Y to shut down cameras or any other button to leave them on')
-    for event in joystick:
+    for event in inputs.get_gamepad():
         if event.ev_type == "Key":
             if event.code == "BTN_NORTH":
                 for ip in ips:

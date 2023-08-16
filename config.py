@@ -11,7 +11,7 @@ sensitivity_tables = {
     'zoom': {'joy': [0, 0.1, 1], 'cam': [0, 0, 7]},
 }
 
-long_press_time = 2
+long_press_time = 1
 
 ips = ['192.168.3.241', '192.168.3.242', '192.168.3.243']
 
