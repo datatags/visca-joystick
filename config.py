@@ -1,5 +1,3 @@
-import platform
-
 from plotly import graph_objects as go
 
 from visca_over_ip import CachingCamera as Camera
@@ -15,35 +13,14 @@ sensitivity_tables = {
 
 long_press_time = 2
 
-ips = ['172.16.0.201', '172.16.0.202', '172.16.0.206']
+ips = ['192.168.3.241', '192.168.3.242', '192.168.3.243']
 
-if platform.system() == 'Linux':
-    mappings = {
-        'cam_select': {1: 0, 2: 1, 3: 2},
-        'movement': {'pan': 0, 'tilt': 1, 'zoom': 5},
-        'brightness': {'up': 4, 'down': 3},
-        'focus': {'near': 4, 'far': 5},
-        'preset': {13: 8},
-        'other': {'exit': 9, 'invert_tilt': 10, 'configure': 3},
-    }
-else:
-    mappings = {
-        'cam_select': {0: 0, 1: 1, 3: 2},
-        'movement': {'pan': 0, 'tilt': 1, 'zoom': 3},
-        'brightness': {'up': 5, 'down': 4},
-        'focus': {'near': 9, 'far': 10},
-        'preset': {11: 8, 12: 9, 13: 10, 14: 11},
-        'other': {'exit': 6, 'invert_tilt': 7, 'configure': 3}
-    }
-
-
-help_text = """Pan & Tilt: Left stick | Invert tilt: Click left stick'
-Zoom: Right stick
-Brightness: Up: Right trigger, Down: Left trigger
+help_text = """Pan & Tilt: Left stick | Invert tilt: Window button'
+Zoom out: Left trigger, Zoom in: Right trigger
 Manual focus: Left and right bumpers
-Select camera 1: X, 2: ◯, 3: △
+Select camera 1: A, 2: B, 3: Y
 Presets: Recall: D-pad, Set: D-pad long press
-Exit: Options"""
+Exit: Hamburger button"""
 
 
 if __name__ == '__main__':

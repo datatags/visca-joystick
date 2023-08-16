@@ -1,110 +1,207 @@
-import os
 import time
 
-os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
-
-import pygame
 from visca_over_ip.exceptions import ViscaException
 from numpy import interp
 
-from config import ips, mappings, sensitivity_tables, help_text, Camera, long_press_time
-from startup_shutdown import shut_down, configure
+from config import ips, sensitivity_tables, help_text, Camera, long_press_time
+from startup_shutdown import shut_down, ask_to_configure
 
+import inputs
 
 invert_tilt = True
 cam = None
 joystick = None
-joystick_reset_time = None
-last_focus_time = None
-button_down_time = {key: None for key in mappings['preset']}
+button_hold_trackers = []
+far_focus_down = False
+near_focus_down = False
 
+class ButtonHoldTracker:
+    def __init__(self, code, value=1) -> None:
+        self.code = code
+        self.time = None
+        self.value = value
+    
+    def set(self) -> None:
+        self.time = time.time()
+    
+    def reset(self) -> None:
+        self.time = None
+    
+    def is_set(self) -> bool:
+        return self.time is not None
+    
+    def is_long_press(self) -> bool:
+        return self.is_set() and time.time() - self.time > long_press_time
 
-def joystick_init(print_battery=False):
-    """Initializes pygame and the joystick.
-    This is done occasionally because pygame seems to put the controller to sleep otherwise
-    :param print_battery: If set to True, the battery charge status of the joystick will be printed out
-    """
-    global joystick, joystick_reset_time
+class CameraSelect:
+    def __init__(self, camera) -> None:
+        self.camera = camera
 
-    pygame.joystick.quit()
-    pygame.display.quit()
+    def run(self, event) -> None:
+        if event.state == 1:
+            return
+        global cam
+        cam = connect_to_camera(self.camera)
 
-    pygame.display.init()
-    pygame.joystick.init()
+class Movement:
+    def __init__(self, action, invert=False) -> None:
+        self.action = action
+        self.invert = invert
 
-    while True:
-        try:
-            joystick = pygame.joystick.Joystick(0)
-        except pygame.error:
-            input('No controller found. Please connect one then press enter: ')
+    def convert_to_sensitivity(self, value: float) -> int:
+        sign = 1 if value >= 0 else -1
+        table = sensitivity_tables[self.action]
+
+        return sign * round(
+            interp(abs(value), table['joy'], table['cam'])
+        )    
+
+    def run(self, event) -> None:
+        value = event.state
+        if event.code.endswith("Z"):
+            value /= 255
+        elif event.code.endswith("X") or event.code.endswith("Y"):
+            value /= 32768
+
+        if self.invert:
+                value *= -1
+        if value < 0.1:
+            value = 0
         else:
-            break
+            value = self.convert_to_sensitivity(value)
 
-    if print_battery:
-        print('Joystick battery is', joystick.get_power_level())
+        if self.action == "pan":
+            cam.pan(value)
+        elif self.action == "tilt":
+            cam.tilt(value)
+        elif self.action == "zoom":
+            cam.zoom(value)
 
-    joystick_reset_time = time.time() + 20
+class Focus:
+    def __init__(self, action) -> None:
+        self.action = action
+        self.ignore_next = False
 
-
-def joy_pos_to_cam_speed(axis_position: float, table_name: str, invert=True) -> int:
-    """Converts from a joystick axis position to a camera speed using the given mapping
-
-    :param axis_position: the raw value of an axis of the joystick -1 to 1
-    :param table_name: one of the keys in sensitivity_tables
-    :param invert: if True, the sign of the output will be flipped
-    :return: an integer which can be fed to a Camera driver method
-    """
-    sign = 1 if axis_position >= 0 else -1
-    if invert:
-        sign *= -1
-
-    table = sensitivity_tables[table_name]
-
-    return sign * round(
-        interp(abs(axis_position), table['joy'], table['cam'])
-    )
-
-
-def update_focus():
-    """Reads the state of the bumpers and toggles manual focus, focuses near, or focuses far."""
-    global last_focus_time
-    time_since_last_adjust = time.time() - last_focus_time if last_focus_time else 30
-
-    focus_near = joystick.get_button(mappings['focus']['near'])
-    focus_far = joystick.get_button(mappings['focus']['far'])
-    manual_focus = cam.get_focus_mode() == 'manual'
-
-    if focus_near and focus_far and time_since_last_adjust > .4:
-        last_focus_time = time.time()
+    def toggle_focus_mode(self) -> None:
+        manual_focus = cam.get_focus_mode() == 'manual'
         if manual_focus:
             cam.set_focus_mode('auto')
             print('Auto focus')
         else:
             cam.set_focus_mode('manual')
             print('Manual focus')
+            self.ignore_next = True
 
-    elif focus_far and manual_focus and time_since_last_adjust > .1:
-        last_focus_time = time.time()
+    def run(self, event) -> None:
+        if self.action == "near":
+            global near_focus_down
+            near_focus_down = event.state
+        elif self.action == "far":
+            global far_focus_down
+            far_focus_down = event.state
 
-        cam.manual_focus(-1)
-        time.sleep(.01)
-        cam.manual_focus(0)
+        if near_focus_down and far_focus_down:
+            self.toggle_focus_mode()
+            return
+        
+        if event.state == 1 or cam.get_focus_mode() == 'auto':
+            return
 
-    elif focus_near and manual_focus and time_since_last_adjust > .1:
-        last_focus_time = time.time()
+        if self.ignore_next:
+            self.ignore_next = False
+            return
+        
+        if self.action == "near":
+            cam.manual_focus(-1)
+        elif self.action == "far":
+            cam.manual_focus(1)
 
-        cam.manual_focus(1)
-        time.sleep(.01)
-        cam.manual_focus(0)
+class Preset:
+    def __init__(self, preset_positive, preset_negative=None) -> None:
+        self.preset_negative = preset_negative
+        self.preset_positive = preset_positive
+        self.ignore_next = False
+        if self.preset_negative is not None:
+            self.negative_tracker = ButtonHoldTracker(self.preset_negative, -1)
+            button_hold_trackers.append(self.negative_tracker)
+        self.positive_tracker = ButtonHoldTracker(self.preset_positive, 1)
+        button_hold_trackers.append(self.positive_tracker)
+    
+    def signed_code(self, event) -> str:
+        if self.preset_negative is None:
+            return event.code
+        return event.code + ("P" if event.state == -1 else "N")
 
+    def run(self, event) -> None:
+        if event.state != 0:
+            if event.state == 1:
+                self.positive_tracker.set()
+            elif event.state == -1:
+                self.negative_tracker.set()
+            return
+        self.positive_tracker.reset()
+        self.negative_tracker.reset()
+        if self.ignore_next:
+            self.ignore_next = False
+            return
+        if event.state == -1:
+            cam.recall_preset(self.preset_negative)
+        elif event.state == 1:
+            cam.recall_preset(self.preset_positive)
+    
+    def check_held(self):
+        if self.positive_tracker.is_long_press():
+            cam.set_preset(self.preset_positive)
+        elif self.negative_tracker.is_long_press():
+            cam.set_preset(self.preset_negative)
+        else:
+            return
+        self.ignore_next = True
 
-def update_brightness():
-    if joystick.get_axis(mappings['brightness']['up']) > .9:
-        cam.increase_exposure_compensation()
+class ExitAction:
+    def run(self, event) -> None:
+        if event.state == 1:
+            return
+        shut_down(joystick, cam)
 
-    if joystick.get_axis(mappings['brightness']['down']) > .9:
-        cam.decrease_exposure_compensation()
+class InvertTilt:
+    def run(self, event) -> None:
+        if event.state == 1:
+            return
+        global invert_tilt
+        invert_tilt = not invert_tilt
+        print("Invert tilt: " + str(invert_tilt))
 
+mappings = {
+    'ABS_X': Movement('pan'),
+    'ABS_Y': Movement('tilt'),
+    'ABS_Z': Movement('zoom'),
+    'ABS_RZ': Movement('zoom'),
+    'BTN_TL': Focus('near'),
+    'BTN_TR': Focus('far'),
+    'BTN_SOUTH': CameraSelect(0),
+    'BTN_EAST': CameraSelect(1),
+    'BTN_NORTH': CameraSelect(2),
+    'ABS_HAT0X': Preset(2, 0),
+    'ABS_HAT0Y': Preset(3, 1),
+    'BTN_SELECT': ExitAction(),
+    'BTN_START': InvertTilt(),
+}
+
+# mappings = {
+#     'cam_select': {0: 0, 1: 1, 3: 2},
+#     'movement': {'pan': 0, 'tilt': 1, 'zoom': 3},
+#     'focus': {'near': 9, 'far': 10},
+#     'preset': {11: 8, 12: 9, 13: 10, 14: 11},
+#     'other': {'exit': 6, 'invert_tilt': 7, 'configure': 3}
+# }
+
+def joystick_init():
+    """Initializes the gamepad.
+    """
+    global joystick, joystick_reset_time
+
+    joystick = inputs.get_gamepad()
 
 def connect_to_camera(cam_index) -> Camera:
     """Connects to the camera specified by cam_index and returns it"""
@@ -126,74 +223,26 @@ def connect_to_camera(cam_index) -> Camera:
 
     return cam
 
-
-def handle_button_presses():
-    global invert_tilt, cam
-
-    for event in pygame.event.get(eventtype=pygame.JOYBUTTONDOWN):
-        btn_no = event.dict['button']
-        if btn_no == mappings['other']['exit']:
-            shut_down(cam)
-
-        elif btn_no in mappings['cam_select']:
-            cam = connect_to_camera(mappings['cam_select'][btn_no])
-
-        elif btn_no == mappings['other']['invert_tilt']:
-            invert_tilt = not invert_tilt
-            print('Tilt', 'inverted' if not invert_tilt else 'not inverted')
-
-
-def handle_preset_buttons():
-    """Distinguishes between short presses and long presses for recalling and saving presets"""
-    global cam, button_down_time
-
-    for event in pygame.event.get(eventtype=pygame.JOYBUTTONUP):
-        btn_no = event.dict['button']
-
-        if btn_no in mappings['preset']:
-            cam.recall_preset(mappings['preset'][btn_no])
-
-    for btn_no in mappings['preset']:
-        if joystick.get_button(btn_no):
-            if button_down_time[btn_no] is None:
-                button_down_time[btn_no] = time.time()
-
-            elif time.time() - button_down_time[btn_no] > long_press_time:
-                cam.save_preset(mappings['preset'][btn_no])
-
-        else:
-            button_down_time[btn_no] = None
-
-
 def main_loop():
     while True:
-        handle_button_presses()
-        update_brightness()
-        update_focus()
-        handle_preset_buttons()
-
-        cam.pantilt(
-            pan_speed=joy_pos_to_cam_speed(joystick.get_axis(mappings['movement']['pan']), 'pan'),
-            tilt_speed=joy_pos_to_cam_speed(joystick.get_axis(mappings['movement']['tilt']), 'tilt', invert_tilt)
-        )
+        for event in joystick:
+            if event.ev_type == "Sync":
+                continue
+            if event.code in mappings:
+                mappings[event.code].run(event)
         time.sleep(0.03)
-        cam.zoom(joy_pos_to_cam_speed(joystick.get_axis(mappings['movement']['zoom']), 'zoom'))
-
-        if time.time() >= joystick_reset_time:
-            joystick_init()
 
 
 if __name__ == "__main__":
     print('Welcome to VISCA Joystick!')
-    joystick_init(print_battery=True)
+    joystick_init()
     print()
     print(help_text)
-    configure()
+    ask_to_configure(joystick)
     cam = connect_to_camera(0)
 
     while True:
         try:
             main_loop()
-
         except Exception as exc:
             print(exc)
