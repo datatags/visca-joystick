@@ -13,7 +13,7 @@ sensitivity_tables = {
 
 long_press_time = 1
 
-ips = ['192.168.3.241', '192.168.3.242', '192.168.3.243']
+ips = ['192.168.3.243', '192.168.3.242', '192.168.3.241']
 
 help_text = """Pan & Tilt: Left stick | Invert tilt: Window button'
 Zoom out: Left trigger, Zoom in: Right trigger
