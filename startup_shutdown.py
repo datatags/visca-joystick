@@ -10,7 +10,7 @@ def ask_to_configure():
     """Allows the user to configure the cameras or skip this step
     If the user chooses to configure the cameras, they are powered on and preset 9 is recalled
     """
-    print('Press Y to configure cameras or any other button to skip')
+    print('Press Y to power on cameras and recall preset 9 or any other button to skip')
     for event in inputs.get_gamepad():
         if event.ev_type == "Key":
             if event.code == "BTN_NORTH":
@@ -36,7 +36,7 @@ def configure():
 
     time.sleep(2)
 
-def shut_down(joystick, current_camera: Camera):
+def shut_down(current_camera: Camera):
     """Shuts down the program.
     The user is asked if they want to shut down the cameras as well.
     """
