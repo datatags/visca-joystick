@@ -1,6 +1,7 @@
 import time
+import sys
 
-from visca_over_ip.exceptions import ViscaException
+from visca_over_ip.exceptions import ViscaException, NoQueryResponse
 from numpy import interp
 
 from config import ips, sensitivity_tables, help_text, Camera, long_press_time
@@ -15,6 +16,7 @@ FakeEvent = namedtuple("FakeEvent", "ev_type code state")
 
 invert_tilt = True
 cam = None
+current_cam_index = None
 joystick = None
 button_hold_trackers = []
 far_focus_down = False
@@ -23,6 +25,16 @@ pan = 0
 tilt = 0
 event_queue = Queue()
 axis_updated = Event()
+pan_lock = False
+
+# Manually implement https://github.com/zeth/inputs/pull/81
+PATCHED_EVENT_MAP_LIST = []
+for item in inputs.EVENT_MAP:
+    if item[0] != "type_codes":
+        PATCHED_EVENT_MAP_LIST.append(item)
+        continue
+    PATCHED_EVENT_MAP_LIST.append(("type_codes", tuple((value, key) for key, value in inputs.EVENT_TYPES)))
+inputs.EVENT_MAP = tuple(PATCHED_EVENT_MAP_LIST)
 
 class AxisPosition:
     def __init__(self) -> None:
@@ -40,7 +52,7 @@ class AxisPosition:
         with self.lock:
             return self.x
     
-    def changed_and_reset(self) -> bool:
+    def reset_changed(self) -> bool:
         with self.lock:
             if self.changed:
                 self.changed = False
@@ -57,7 +69,7 @@ positions = {
 }
 
 class ButtonHoldTracker:
-    def __init__(self, code, value=1) -> None:
+    def __init__(self, code: str, value: int=1) -> None:
         self.code = code
         self.time = None
         self.value = value
@@ -75,14 +87,20 @@ class ButtonHoldTracker:
         return self.is_set() and time.time() - self.time > long_press_time
 
 class CameraSelect:
-    def __init__(self, camera) -> None:
+    def __init__(self, camera: int) -> None:
         self.camera = camera
 
     def run(self, event) -> None:
         if event.state == 1:
             return
         global cam
-        cam = connect_to_camera(self.camera)
+        try:
+            cam = connect_to_camera(self.camera)
+        except NoQueryResponse:
+            print(f'Could not connect to {self.camera}')
+            # current_cam_index hasn't updated yet
+            cam = connect_to_camera(current_cam_index)
+            return
 
 class Movement:
     def __init__(self, action, invert=False) -> None:
@@ -112,9 +130,15 @@ class Movement:
                 value *= -1
 
         if self.action == "pan":
-            global pan
-            pan = value
-        elif self.action == "tilt":
+            # Pan value should be held, i.e. not updated, if pan lock is on
+            if not pan_lock:
+                global pan
+                pan = value
+            return
+        # Tilt and zoom should be disabled completely while in pan lock
+        if pan_lock:
+            value = 0
+        if self.action == "tilt":
             global tilt
             tilt = value
         elif self.action == "zoom":
@@ -224,6 +248,11 @@ class InvertTilt:
         invert_tilt = not invert_tilt
         print("Invert tilt: " + str(invert_tilt))
 
+class PanLock:
+    def run(self, event) -> None:
+        global pan_lock
+        pan_lock = event.state == 1
+
 mappings = {
     'ABS_X': Movement('pan', invert=True),
     'ABS_Y': Movement('tilt'),
@@ -236,8 +265,7 @@ mappings = {
     'BTN_NORTH': CameraSelect(2),
     'ABS_HAT0X': Preset(2, 0),
     'ABS_HAT0Y': Preset(3, 1),
-    'BTN_SELECT': ExitAction(),
-    'BTN_START': InvertTilt(),
+    'BTN_SELECT': PanLock(),
 }
 
 # mappings = {
@@ -251,6 +279,7 @@ mappings = {
 def connect_to_camera(cam_index) -> Camera:
     """Connects to the camera specified by cam_index and returns it"""
     global cam
+    global current_cam_index
 
     if cam:
         cam.zoom(0)
@@ -264,7 +293,9 @@ def connect_to_camera(cam_index) -> Camera:
     except ViscaException:
         pass
 
-    print(f"Camera {cam_index + 1}")
+    # Set this late in case an exception is thrown
+    current_cam_index = cam_index
+    print(f"Camera {cam_index + 1} connected")
 
     return cam
 
@@ -277,16 +308,35 @@ def main_loop():
             else:
                 print(f"Unmapped key {event.code} {event.state}")
         for key,position in positions.items():
-            if position.changed_and_reset() and key in mappings:
+            if position.reset_changed() and key in mappings:
                 mappings[key].run(FakeEvent("Absolute", key, positions[key].get()))
         cam.pantilt(pan, tilt)
         axis_updated.clear()
             
         time.sleep(0.03)
 
+def wait_for_gamepad():
+    """Wait for a controller to be connected"""
+    devices = 0
+    while devices == 0:
+        time.sleep(0.5)
+        # Reinitialize devices
+        inputs.devices = inputs.DeviceManager()
+        devices = len(inputs.devices.gamepads)
+
+def get_gamepad_events():
+    try:
+        return inputs.get_gamepad()
+    except inputs.UnpluggedError:
+        print("Controller disconnected, waiting for it to be reconnected...")
+        wait_for_gamepad()
+        print("Controller reconnected")
+        # Recurse rather than repeating code
+        return get_gamepad_events()
+
 def axis_tracker():
     while True:
-        for event in inputs.get_gamepad():
+        for event in get_gamepad_events():
             if event.ev_type == "Sync":
                 continue
             elif event.ev_type == "Absolute":
@@ -294,15 +344,39 @@ def axis_tracker():
                     positions[event.code].set(event.state)
                     axis_updated.set()
                     continue
+            # Send button events and unmapped axes along to main loop to be handled
+            # Unmapped axes must be sent because D-Pad is an axis while functioning as buttons
             event_queue.put(event)
+
+def check_gamepad():
+    """Check for a connected controller and wait for one if none are connected"""
+    if len(inputs.devices.gamepads) == 0:
+        print("Waiting for controller to be connected...")
+        wait_for_gamepad()
+    print("Controller connected")
+
+def initial_connection():
+    global cam
+    for i in range(len(ips)):
+        try:
+            cam = connect_to_camera(0)
+            return
+        except NoQueryResponse:
+            print(f"Couldn't find camera {i + 1}")
+    print("Couldn't find any cameras, quitting")
+    shut_down(None)
 
 if __name__ == "__main__":
     print('Welcome to VISCA Joystick!')
+    check_gamepad()
     print()
     print(help_text)
     ask_to_configure()
-    cam = connect_to_camera(0)
+    initial_connection()
     axis_tracker_thread = Thread(target=axis_tracker, daemon=True)
     axis_tracker_thread.start()
 
-    main_loop()
+    try:
+        main_loop()
+    except KeyboardInterrupt:
+        shut_down(cam)
