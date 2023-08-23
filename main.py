@@ -275,14 +275,6 @@ mappings = {
     'BTN_SELECT': PanLock(),
 }
 
-# mappings = {
-#     'cam_select': {0: 0, 1: 1, 3: 2},
-#     'movement': {'pan': 0, 'tilt': 1, 'zoom': 3},
-#     'focus': {'near': 9, 'far': 10},
-#     'preset': {11: 8, 12: 9, 13: 10, 14: 11},
-#     'other': {'exit': 6, 'invert_tilt': 7, 'configure': 3}
-# }
-
 def connect_to_camera(cam_index) -> Camera:
     """Connects to the camera specified by cam_index and returns it"""
     global cam
