@@ -24,7 +24,6 @@ near_focus_down = False
 pan = 0
 tilt = 0
 event_queue = Queue()
-axis_updated = Event()
 pan_lock = False
 
 # Manually implement https://github.com/zeth/inputs/pull/81
@@ -249,9 +248,17 @@ class InvertTilt:
         print("Invert tilt: " + str(invert_tilt))
 
 class PanLock:
+    """When pan lock is on, the current pan speed will be held constant
+    and tilt and zoom will be disabled.
+    Pan lock is only enabled while holding the button, it's not a toggle."""
     def run(self, event) -> None:
         global pan_lock
         pan_lock = event.state == 1
+        print(f"Pan lock: {pan_lock}")
+        # Reset pan when pan lock is disabled
+        if not pan_lock:
+            global pan
+            pan = 0
 
 mappings = {
     'ABS_X': Movement('pan', invert=True),
@@ -311,7 +318,6 @@ def main_loop():
             if position.reset_changed() and key in mappings:
                 mappings[key].run(FakeEvent("Absolute", key, positions[key].get()))
         cam.pantilt(pan, tilt)
-        axis_updated.clear()
             
         time.sleep(0.03)
 
@@ -342,7 +348,6 @@ def axis_tracker():
             elif event.ev_type == "Absolute":
                 if event.code in positions:
                     positions[event.code].set(event.state)
-                    axis_updated.set()
                     continue
             # Send button events and unmapped axes along to main loop to be handled
             # Unmapped axes must be sent because D-Pad is an axis while functioning as buttons
@@ -359,7 +364,7 @@ def initial_connection():
     global cam
     for i in range(len(ips)):
         try:
-            cam = connect_to_camera(0)
+            cam = connect_to_camera(i)
             return
         except NoQueryResponse:
             print(f"Couldn't find camera {i + 1}")

@@ -45,23 +45,23 @@ def shut_down(current_camera: Camera):
     # There's a good chance the cameras can't be connected to anyway.
     if current_camera is not None:
         current_camera.close_connection()
-    # Discard any unread events without blocking
-    inputs.devices = inputs.DeviceManager()
-    print('Press Y to shut down cameras or any other button to leave them on')
-    pressed = 0
-    while pressed == 0:
-        for event in inputs.get_gamepad():
-            if event.ev_type == "Key":
-                if event.code == "BTN_NORTH":
-                    for index,ip in enumerate(ips):
-                        # GitHub Copilot wrote this line and I think it's hilarious so I'm keeping it
-                        print(f"Bye bye camera {index + 1}! :)")
-                        # This doesn't fail even if the camera is already off
-                        cam = Camera(ip)
-                        cam.set_power(False)
-                        cam.close_connection()
-                pressed = 1
-                break
-            time.sleep(0.05)
+        # Discard any unread events without blocking
+        inputs.devices = inputs.DeviceManager()
+        print('Press Y to shut down cameras or any other button to leave them on')
+        pressed = 0
+        while pressed == 0:
+            for event in inputs.get_gamepad():
+                if event.ev_type == "Key":
+                    if event.code == "BTN_NORTH":
+                        for index,ip in enumerate(ips):
+                            # GitHub Copilot wrote this line and I think it's hilarious so I'm keeping it
+                            print(f"Bye bye camera {index + 1}! :)")
+                            # This doesn't fail even if the camera is already off
+                            cam = Camera(ip)
+                            cam.set_power(False)
+                            cam.close_connection()
+                    pressed = 1
+                    break
+                time.sleep(0.05)
 
     exit(0)
