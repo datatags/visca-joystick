@@ -6,7 +6,12 @@ from visca_over_ip.exceptions import NoQueryResponse
 
 from config import ips
 
+def discard_input():
+    # Discard any unread events without blocking
+    inputs.devices = inputs.DeviceManager()
+
 def wait_for_button():
+    discard_input()
     while True:
         for event in inputs.get_gamepad():
             if event.ev_type == "Key" and event.state == 1:
@@ -20,6 +25,8 @@ def ask_to_configure():
     print('Press Y to power on cameras and recall preset 9 or any other button to skip')
     if wait_for_button() == "BTN_NORTH":
         configure()
+        # Prevents button release messages from being read as input in later code
+        discard_input()
 
 def configure():
     print(f'Configuring...')
@@ -47,8 +54,6 @@ def shut_down(current_camera: Camera):
     # There's a good chance the cameras can't be connected to anyway.
     if current_camera is not None:
         current_camera.close_connection()
-        # Discard any unread events without blocking
-        inputs.devices = inputs.DeviceManager()
         print('Press Y to shut down cameras or any other button to leave them on')
         if wait_for_button() == "BTN_NORTH":
             for index,ip in enumerate(ips):

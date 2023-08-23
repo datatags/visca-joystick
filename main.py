@@ -5,7 +5,7 @@ from visca_over_ip.exceptions import ViscaException, NoQueryResponse
 from numpy import interp
 
 from config import ips, sensitivity_tables, help_text, Camera, long_press_time
-from startup_shutdown import shut_down, ask_to_configure
+from startup_shutdown import shut_down, ask_to_configure, discard_input
 
 import inputs
 from threading import Thread, Lock, Event
@@ -92,14 +92,15 @@ class CameraSelect:
     def run(self, event) -> None:
         if event.state == 1:
             return
-        global cam
         try:
-            cam = connect_to_camera(self.camera)
+            connect_to_camera(self.camera)
         except NoQueryResponse:
-            print(f'Could not connect to {self.camera}')
             # current_cam_index hasn't updated yet
-            cam = connect_to_camera(current_cam_index)
-            return
+            print(f'Could not connect to {self.camera + 1}, going back to {current_cam_index + 1}')
+        # If this line is in the except block, it doesn't work,
+        # complaining that a socket is already bound to that port.
+        # I'm thinking it has something to do with scope but I'm not sure.
+        connect_to_camera(current_cam_index)
 
 class Movement:
     def __init__(self, action, invert=False) -> None:
@@ -287,10 +288,7 @@ def connect_to_camera(cam_index) -> Camera:
 
     cam = Camera(ips[cam_index])
 
-    try:
-        cam.zoom(0)
-    except ViscaException:
-        pass
+    cam.zoom(0)
 
     # Set this late in case an exception is thrown
     current_cam_index = cam_index
@@ -356,7 +354,7 @@ def initial_connection():
     global cam
     for i in range(len(ips)):
         try:
-            cam = connect_to_camera(i)
+            connect_to_camera(i)
             return
         except NoQueryResponse:
             print(f"Couldn't find camera {i + 1}")
