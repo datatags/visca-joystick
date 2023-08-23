@@ -94,9 +94,12 @@ class CameraSelect:
             return
         try:
             connect_to_camera(self.camera)
+            return
         except NoQueryResponse:
-            # current_cam_index hasn't updated yet
-            print(f'Could not connect to {self.camera + 1}, going back to {current_cam_index + 1}')
+            # Scope issue, see below
+            pass
+        # current_cam_index hasn't updated yet
+        print(f'Could not connect to {self.camera + 1}, going back to {current_cam_index + 1}')
         # If this line is in the except block, it doesn't work,
         # complaining that a socket is already bound to that port.
         # I'm thinking it has something to do with scope but I'm not sure.
