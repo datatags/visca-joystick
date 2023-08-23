@@ -25,9 +25,9 @@ def ask_to_configure():
     print('Press Y to power on cameras and recall preset 9 or any other button to skip')
     if wait_for_button() == "BTN_NORTH":
         configure()
-        # Prevents button release messages from being read as input in later code
-        time.sleep(0.5)
-        discard_input()
+    # Prevents button release messages from being read as input in later code
+    time.sleep(0.5)
+    discard_input()
 
 def configure():
     print(f'Configuring...')
