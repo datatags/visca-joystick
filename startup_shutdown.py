@@ -26,6 +26,7 @@ def ask_to_configure():
     if wait_for_button() == "BTN_NORTH":
         configure()
         # Prevents button release messages from being read as input in later code
+        time.sleep(0.5)
         discard_input()
 
 def configure():
