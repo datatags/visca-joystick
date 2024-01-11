@@ -5,7 +5,7 @@ from visca_over_ip.exceptions import ViscaException, NoQueryResponse
 from numpy import interp
 
 from config import ips, sensitivity_tables, help_text, Camera, long_press_time
-from startup_shutdown import shut_down, ask_to_configure, discard_input
+from startup_shutdown import shut_down, ask_to_configure, discard_input, wait_for_gamepad, get_gamepad_events
 
 import inputs
 from threading import Thread, Lock, Event
@@ -313,25 +313,6 @@ def main_loop():
         cam.pantilt(pan, tilt)
             
         time.sleep(0.03)
-
-def wait_for_gamepad():
-    """Wait for a controller to be connected"""
-    devices = 0
-    while devices == 0:
-        time.sleep(0.5)
-        # Reinitialize devices
-        inputs.devices = inputs.DeviceManager()
-        devices = len(inputs.devices.gamepads)
-
-def get_gamepad_events():
-    try:
-        return inputs.get_gamepad()
-    except inputs.UnpluggedError:
-        print("Controller disconnected, waiting for it to be reconnected...")
-        wait_for_gamepad()
-        print("Controller reconnected")
-        # Recurse rather than repeating code
-        return get_gamepad_events()
 
 def axis_tracker():
     while True:
