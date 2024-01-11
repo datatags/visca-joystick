@@ -264,19 +264,39 @@ class PanLock:
             global pan
             pan = 0
 
+class OnePushFocus:
+    """Triggers 'one push auto focus'"""
+    def run(self, event) -> None:
+        if event.state == 1:
+            return
+        cam.set_focus_mode('one push trigger')
+        print("Focusing")
+
+class ExposureWhiteBalanceManual:
+    """Resets exposure and white balance to manual mode"""
+    def run(self, event) -> None:
+        if event.state == 1:
+            return
+        cam.autoexposure_mode('manual')
+        cam.white_balance_mode('manual')
+        print("Exposure and white balance set to manual")
+
 mappings = {
     'ABS_X': Movement('pan', invert=True),
     'ABS_Y': Movement('tilt'),
     'ABS_Z': Movement('zoom', invert=True),
+    'ABS_RX': Movement('pan', invert=True),
     'ABS_RZ': Movement('zoom'),
     'BTN_TL': Focus('near'),
     'BTN_TR': Focus('far'),
     'BTN_SOUTH': CameraSelect(0),
     'BTN_EAST': CameraSelect(1),
     'BTN_NORTH': CameraSelect(2),
+    'BTN_WEST': OnePushFocus(),
     'ABS_HAT0X': Preset(2, 0),
     'ABS_HAT0Y': Preset(3, 1),
     'BTN_SELECT': PanLock(),
+    'BTN_START': ExposureWhiteBalanceManual(),
 }
 
 def connect_to_camera(cam_index) -> Camera:

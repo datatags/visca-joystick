@@ -15,13 +15,16 @@ long_press_time = 1
 
 ips = ['192.168.3.243', '192.168.3.242', '192.168.3.241']
 
-help_text = """Pan & Tilt: Left stick'
+help_text = """Pan & Tilt: Left stick
+Pan only: Right stick
 Zoom out: Left trigger, Zoom in: Right trigger
 Manual focus adjustment: Hold left/right bumper
 Toggle auto focus: Press both bumpers simultaneously
+One push auto focus: X
 Select camera 1: A, 2: B, 3: Y
 Presets: Recall: D-pad, Set: D-pad long press
 Pan lock: Press and hold hamburger button
+Manual white balance + exposure: View button
 Exit: Ctrl-C"""
 
 
