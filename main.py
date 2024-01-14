@@ -365,7 +365,17 @@ def initial_connection():
     print("Couldn't find any cameras, quitting")
     shut_down(None)
 
+def check_quickedit():
+    if not inputs.WIN:
+        return
+    # https://stackoverflow.com/a/76855923
+    import ctypes
+    kernel32 = ctypes.windll.kernel32
+    # ENABLE_PROCESSED_INPUT & ENABLE_EXTENDED_FLAGS
+    kernel32.SetConsoleMode(kernel32.GetStdHandle(-10), 0x81)
+
 if __name__ == "__main__":
+    check_quickedit()
     print('Welcome to VISCA Joystick!')
     check_gamepad()
     print()
