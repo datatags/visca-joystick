@@ -1,3 +1,4 @@
+import sys
 import time
 from visca_over_ip import Camera
 
@@ -9,8 +10,11 @@ def ask_to_configure():
     If the user chooses to configure the cameras, they are powered on and preset 9 is recalled
     """
     print('Press Y to power on cameras and recall preset 9 or any other button to skip')
-    if wait_for_button() == "BTN_NORTH":
+    button = wait_for_button()
+    if button == "BTN_NORTH":
         configure()
+    elif button == "CTRL_C":
+        sys.exit()
     # Prevents button release messages from being read as input in later code
     time.sleep(0.5)
     while not event_queue.empty():
