@@ -1,18 +1,12 @@
 import time
-import sys
-
-from visca_over_ip.exceptions import ViscaException, NoQueryResponse
-from numpy import interp
-
-from config import ips, sensitivity_tables, help_text, Camera, long_press_time
-from startup_shutdown import shut_down, ask_to_configure, discard_input, wait_for_gamepad, get_gamepad_events
-
 import inputs
-from threading import Thread, Lock, Event
-from queue import Queue
+from numpy import interp
 from collections import namedtuple
+from visca_over_ip.exceptions import NoQueryResponse
 
-FakeEvent = namedtuple("FakeEvent", "ev_type code state")
+from startup_shutdown import shut_down, ask_to_configure
+from controller_input import check_gamepad, event_queue, positions
+from config import ips, sensitivity_tables, help_text, Camera, long_press_time
 
 invert_tilt = True
 cam = None
@@ -23,49 +17,9 @@ far_focus_down = False
 near_focus_down = False
 pan = 0
 tilt = 0
-event_queue = Queue()
 pan_lock = False
 
-# Manually implement https://github.com/zeth/inputs/pull/81
-PATCHED_EVENT_MAP_LIST = []
-for item in inputs.EVENT_MAP:
-    if item[0] != "type_codes":
-        PATCHED_EVENT_MAP_LIST.append(item)
-        continue
-    PATCHED_EVENT_MAP_LIST.append(("type_codes", tuple((value, key) for key, value in inputs.EVENT_TYPES)))
-inputs.EVENT_MAP = tuple(PATCHED_EVENT_MAP_LIST)
-
-class AxisPosition:
-    def __init__(self) -> None:
-        self.lock = Lock()
-        self.x = 0
-        self.changed = False
-    
-    def set(self, x) -> None:
-        if self.x != x:
-            with self.lock:
-                self.changed = True
-                self.x = x
-    
-    def get(self) -> int:
-        with self.lock:
-            return self.x
-    
-    def reset_changed(self) -> bool:
-        with self.lock:
-            if self.changed:
-                self.changed = False
-                return True
-            return False
-
-positions = {
-    'ABS_X': AxisPosition(),
-    'ABS_Y': AxisPosition(),
-    'ABS_Z': AxisPosition(),
-    'ABS_RX': AxisPosition(),
-    'ABS_RY': AxisPosition(),
-    'ABS_RZ': AxisPosition(),
-}
+FakeEvent = namedtuple("FakeEvent", "ev_type code state")
 
 class ButtonHoldTracker:
     def __init__(self, code: str, value: int=1) -> None:
@@ -125,15 +79,12 @@ class Movement:
         elif event.code.endswith("X") or event.code.endswith("Y"):
             value /= 32768
 
-        if abs(value) < 0.1:
-            value = 0
-        else:
-            value = self.convert_to_sensitivity(value)
-            if self.invert:
-                value *= -1
+        value = self.convert_to_sensitivity(value)
+        if self.invert:
+            value *= -1
 
         if self.action == "pan":
-            # Pan value should be held, i.e. not updated, if pan lock is on
+            # Pan value should not be updated if pan lock is on
             if not pan_lock:
                 global pan
                 pan = value
@@ -319,41 +270,6 @@ def connect_to_camera(cam_index) -> Camera:
 
     return cam
 
-def main_loop():
-    while True:
-        while not event_queue.empty():
-            event = event_queue.get_nowait()
-            if event.code in mappings:
-                mappings[event.code].run(event)
-            else:
-                print(f"Unmapped key {event.code} {event.state}")
-        for key,position in positions.items():
-            if position.reset_changed() and key in mappings:
-                mappings[key].run(FakeEvent("Absolute", key, positions[key].get()))
-        cam.pantilt(pan, tilt)
-            
-        time.sleep(0.03)
-
-def axis_tracker():
-    while True:
-        for event in get_gamepad_events():
-            if event.ev_type == "Sync":
-                continue
-            elif event.ev_type == "Absolute":
-                if event.code in positions:
-                    positions[event.code].set(event.state)
-                    continue
-            # Send button events and unmapped axes along to main loop to be handled
-            # Unmapped axes must be sent because D-Pad is an axis while functioning as buttons
-            event_queue.put(event)
-
-def check_gamepad():
-    """Check for a connected controller and wait for one if none are connected"""
-    if len(inputs.devices.gamepads) == 0:
-        print("Waiting for controller to be connected...")
-        wait_for_gamepad()
-    print("Controller connected")
-
 def initial_connection():
     global cam
     for i in range(len(ips)):
@@ -374,6 +290,20 @@ def check_quickedit():
     # ENABLE_PROCESSED_INPUT & ENABLE_EXTENDED_FLAGS
     kernel32.SetConsoleMode(kernel32.GetStdHandle(-10), 0x81)
 
+def main_loop():
+    while True:
+        while not event_queue.empty():
+            event = event_queue.get_nowait()
+            if event.code in mappings:
+                mappings[event.code].run(event)
+            else:
+                print(f"Unmapped key {event.code} {event.state}")
+        for key,position in positions.items():
+            if position.reset_changed() and key in mappings:
+                mappings[key].run(FakeEvent("Absolute", key, positions[key].get()))
+        cam.pantilt(pan, tilt)
+        time.sleep(0.03)
+
 if __name__ == "__main__":
     check_quickedit()
     print('Welcome to VISCA Joystick!')
@@ -382,8 +312,6 @@ if __name__ == "__main__":
     print(help_text)
     ask_to_configure()
     initial_connection()
-    axis_tracker_thread = Thread(target=axis_tracker, daemon=True)
-    axis_tracker_thread.start()
 
     try:
         main_loop()
