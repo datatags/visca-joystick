@@ -13,7 +13,7 @@ sensitivity_tables = {
 
 long_press_time = 1
 
-ips = ['192.168.3.243', '192.168.3.242', '192.168.3.241']
+ips = ['192.168.3.243', '192.168.3.242', '192.168.3.244']
 
 help_text = """Pan & Tilt: Left stick
 Pan only: Right stick
