@@ -15,6 +15,17 @@ long_press_time = 1
 
 ips = ['192.168.3.243', '192.168.3.242', '192.168.3.244']
 
+# start: Preset to go to when auto tracking starts
+# stop: Preset to go to when auto tracking is stopped
+# loss: Preset to go to when auto tracking loses its target
+# All 3 support None to mean "don't move".
+# Presets should be listed as strings, e.g. "0"
+autotracking = {
+    'start': None,
+    'stop': None,
+    'loss': None
+}
+
 help_text = """Pan & Tilt: Left stick
 Pan only: Right stick
 Zoom out: Left trigger, Zoom in: Right trigger
@@ -24,7 +35,8 @@ One push auto focus: X
 Select camera 1: A, 2: B, 3: Y
 Presets: Recall: D-pad, Set: D-pad long press
 Pan lock: Press and hold hamburger button
-Manual white balance + exposure: View button
+Manual white balance + exposure: Press view button
+Auto tracking: Press and hold view button
 Exit: Ctrl-C"""
 
 

@@ -1,31 +1,42 @@
+import json
 import time
 import inputs
+import requests
 from numpy import interp
 from collections import namedtuple
+from requests.auth import HTTPDigestAuth
 from visca_over_ip.exceptions import NoQueryResponse, ViscaException
 
 from startup_shutdown import shut_down, ask_to_configure
 from controller_input import check_gamepad, event_queue, positions
-from config import ips, sensitivity_tables, help_text, Camera, long_press_time
+from config import ips, sensitivity_tables, help_text, Camera, long_press_time, autotracking
 
 invert_tilt = True
 cam = None
 current_cam_index = None
 joystick = None
-button_hold_trackers = []
 far_focus_down = False
 near_focus_down = False
 pan = 0
 tilt = 0
 pan_lock = False
+autotracking_session = None
+autotracking_url = None
+autotracking_data = {
+    "trackMode": "this should be automatically updated as needed",
+    "delayTime": "1",
+    "startPosition": autotracking["start"] or "now",
+    "stopPosition": autotracking["stop"] or "now",
+    "lossPosition": autotracking["loss"] or "now",
+    "lossTime": "6"
+}
+tracking_now = False
 
 FakeEvent = namedtuple("FakeEvent", "ev_type code state")
 
 class ButtonHoldTracker:
-    def __init__(self, code: str, value: int=1) -> None:
-        self.code = code
+    def __init__(self) -> None:
         self.time = None
-        self.value = value
     
     def set(self) -> None:
         self.time = time.time()
@@ -38,6 +49,21 @@ class ButtonHoldTracker:
     
     def is_long_press(self) -> bool:
         return self.is_set() and time.time() - self.time > long_press_time
+
+class AltButtonForHold:
+    def __init__(self, momentary, hold) -> None:
+        self.tracker = ButtonHoldTracker()
+        self.momentary = momentary
+        self.hold = hold
+    
+    def run(self, event) -> None:
+        if event.state == 1:
+            self.tracker.set()
+            return
+        if self.tracker.is_long_press():
+            self.hold.run(event)
+        else:
+            self.momentary.run(event)
 
 class CameraSelect:
     def __init__(self, camera: int) -> None:
@@ -100,6 +126,7 @@ class Movement:
             tilt = value
         elif self.action == "zoom":
             cam.zoom(value)
+            print(f"Zooming to {value}")
 
 class Focus:
     def __init__(self, action) -> None:
@@ -150,15 +177,8 @@ class Preset:
         self.preset_positive = preset_positive
         self.ignore_next = False
         if self.preset_negative is not None:
-            self.negative_tracker = ButtonHoldTracker(self.preset_negative, -1)
-            button_hold_trackers.append(self.negative_tracker)
-        self.positive_tracker = ButtonHoldTracker(self.preset_positive, 1)
-        button_hold_trackers.append(self.positive_tracker)
-    
-    def signed_code(self, event) -> str:
-        if self.preset_negative is None:
-            return event.code
-        return event.code + ("P" if event.state == -1 else "N")
+            self.negative_tracker = ButtonHoldTracker()
+        self.positive_tracker = ButtonHoldTracker()
 
     def run(self, event) -> None:
         if event.state != 0:
@@ -241,6 +261,24 @@ class ExposureWhiteBalanceManual:
         cam.white_balance_mode('manual')
         print("Exposure and white balance set to manual")
 
+class AutoTracking:
+    """Enables or disables autotracking"""
+    def run(self, event) -> None:
+        global tracking_now
+        if tracking_now:
+            autotracking_data["trackMode"] = "off"
+        else:
+            autotracking_data["trackMode"] = "tracking"
+        tracking_now = not tracking_now
+        resp = autotracking_session.post(autotracking_url, json=autotracking_data)
+        if not resp.ok:
+            print(f"Failed to set autotracking state: {resp.status_code}")
+            return
+        if tracking_now:
+            print("Autotracking is now on")
+        else:
+            print("Autotracking is now off")
+
 mappings = {
     'ABS_X': Movement('pan', invert=True),
     'ABS_Y': Movement('tilt'),
@@ -256,7 +294,7 @@ mappings = {
     'ABS_HAT0X': Preset(2, 0),
     'ABS_HAT0Y': Preset(3, 1),
     'BTN_SELECT': PanLock(),
-    'BTN_START': ExposureWhiteBalanceManual(),
+    'BTN_START': AltButtonForHold(ExposureWhiteBalanceManual(), AutoTracking())
 }
 
 def connect_to_camera(cam_index) -> Camera:
@@ -290,13 +328,41 @@ def initial_connection():
     print("Couldn't find any cameras, quitting")
     shut_down(None)
 
+def autotracking_init():
+    try:
+        with open("credentials.json") as f:
+            creds = json.load(f)
+            host = creds["host"]
+            username = creds["username"]
+            password = creds["password"]
+    except IOError:
+        print("credentials.json not found, will not use auto tracking")
+        return
+    except KeyError:
+        print("credentials.json does not contain all required values, will not use auto tracking")
+        return
+
+    global autotracking_session
+    autotracking_session = requests.Session()
+    autotracking_session.auth = HTTPDigestAuth(username, password)
+
+    global autotracking_url
+    autotracking_url = f"http://{host}/api/v1/control/track"
+    # We just do this to check that our credentials actually work
+    resp = autotracking_session.get(autotracking_url)
+    if not resp.ok:
+        print("Error response from auto tracking device, will not use auto tracking")
+        autotracking_session = None
+        return
+    print("Auto tracking ready!")
+
 def check_quickedit():
     if not inputs.WIN:
         return
     # https://stackoverflow.com/a/76855923
     import ctypes
     kernel32 = ctypes.windll.kernel32
-    # ENABLE_PROCESSED_INPUT & ENABLE_EXTENDED_FLAGS
+    # 0x81 = ENABLE_PROCESSED_INPUT & ENABLE_EXTENDED_FLAGS
     kernel32.SetConsoleMode(kernel32.GetStdHandle(-10), 0x81)
 
 def main_loop():
@@ -330,6 +396,7 @@ if __name__ == "__main__":
     print(help_text)
     ask_to_configure()
     initial_connection()
+    autotracking_init()
 
     try:
         main_loop()

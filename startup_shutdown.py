@@ -1,6 +1,7 @@
 import sys
 import time
 from visca_over_ip import Camera
+from visca_over_ip.exceptions import ViscaException
 
 from config import ips
 from controller_input import wait_for_button, event_queue
@@ -33,7 +34,10 @@ def configure():
 
     for ip in ips:
         cam = Camera(ip)
-        cam.recall_preset(8)
+        try:
+            cam.recall_preset(8)
+        except ViscaException:
+            pass
         cam.close_connection()
 
     time.sleep(2)
