@@ -249,7 +249,8 @@ class OnePushFocus:
     def run(self, event) -> None:
         if event.state == 1:
             return
-        cam.set_focus_mode('one push trigger')
+        # Dunno why the library doesn't use this command for the one push auto focus
+        cam._send_command("04 38 04")
         print("Focusing")
 
 class ExposureWhiteBalanceManual:
