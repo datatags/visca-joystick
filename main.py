@@ -2,7 +2,7 @@ import time
 import inputs
 from numpy import interp
 from collections import namedtuple
-from visca_over_ip.exceptions import NoQueryResponse
+from visca_over_ip.exceptions import NoQueryResponse, ViscaException
 
 from startup_shutdown import shut_down, ask_to_configure
 from controller_input import check_gamepad, event_queue, positions
@@ -52,8 +52,11 @@ class CameraSelect:
         except NoQueryResponse:
             # Scope issue, see below
             pass
+        except ViscaException:
+            print("Camera refused connection (need to disable autotracking?)")
         # current_cam_index hasn't updated yet
         print(f'Could not connect to {self.camera + 1}, going back to {current_cam_index + 1}')
+
         # If this line is in the except block, it doesn't work,
         # complaining that a socket is already bound to that port.
         # I'm thinking it has something to do with scope but I'm not sure.
@@ -175,9 +178,15 @@ class Preset:
             self.ignore_next = False
             return
         if negative:
-            cam.recall_preset(self.preset_negative)
+            preset = self.preset_negative
         elif positive:
-            cam.recall_preset(self.preset_positive)
+            preset = self.preset_positive
+        else:
+            return
+        try:
+            cam.recall_preset(preset)
+        except ViscaException:
+            print("Preset recall failure (does the preset exist?)")
     
     def check_held(self):
         if self.positive_tracker.is_long_press():
@@ -295,13 +304,22 @@ def main_loop():
         while not event_queue.empty():
             event = event_queue.get_nowait()
             if event.code in mappings:
-                mappings[event.code].run(event)
+                try:
+                    mappings[event.code].run(event)
+                except ViscaException:
+                    print("Control failure")
             else:
                 print(f"Unmapped key {event.code} {event.state}")
         for key,position in positions.items():
             if position.reset_changed() and key in mappings:
-                mappings[key].run(FakeEvent("Absolute", key, positions[key].get()))
-        cam.pantilt(pan, tilt)
+                try:
+                    mappings[key].run(FakeEvent("Absolute", key, positions[key].get()))
+                except ViscaException:
+                    print("Control failure")
+        try:
+            cam.pantilt(pan, tilt)
+        except ViscaException:
+            print("Pan-tilt control failure")
         time.sleep(0.03)
 
 if __name__ == "__main__":
