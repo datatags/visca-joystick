@@ -302,15 +302,13 @@ def connect_to_camera(cam_index) -> Camera:
     """Connects to the camera specified by cam_index and returns it"""
     global cam
     global current_cam_index
+    if cam_index == current_cam_index:
+        return cam
 
     if cam:
-        cam.zoom(0)
-        cam.pantilt(0, 0)
         cam.close_connection()
 
     cam = Camera(ips[cam_index])
-
-    cam.zoom(0)
 
     # Set this late in case an exception is thrown
     current_cam_index = cam_index
