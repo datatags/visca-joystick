@@ -6,8 +6,8 @@ from visca_over_ip import CachingCamera as Camera
 num_cams = 3
 
 sensitivity_tables = {
-    'pan': {'joy': [0, 0.07, 0.3, 0.7, 0.9, 1], 'cam': [0, 0, 2, 8, 15, 20]},
-    'tilt': {'joy': [0, 0.07, 0.3, 0.65, 0.85, 1], 'cam': [0, 0, 3, 6, 14, 18]},
+    'pan': {'joy': [0, 0.1, 0.3, 0.7, 0.9, 1], 'cam': [0, 1, 2, 4, 7, 11]},
+    'tilt': {'joy': [0, 0.1, 0.3, 0.65, 0.85, 1], 'cam': [0, 0, 3, 6, 14, 18]},
     'zoom': {'joy': [0, 0.1, 1], 'cam': [0, 0, 7]},
 }
 

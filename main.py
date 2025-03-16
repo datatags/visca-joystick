@@ -291,8 +291,8 @@ mappings = {
     'BTN_EAST': CameraSelect(1),
     'BTN_NORTH': CameraSelect(2),
     'BTN_WEST': OnePushFocus(),
-    'ABS_HAT0X': Preset(2, 0),
-    'ABS_HAT0Y': Preset(3, 1),
+    'ABS_HAT0X': Preset(12, 10),
+    'ABS_HAT0Y': Preset(13, 11),
     'BTN_SELECT': PanLock(),
     'BTN_START': AltButtonForHold(ExposureWhiteBalanceManual(), AutoTracking())
 }
