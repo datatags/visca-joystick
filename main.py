@@ -126,7 +126,6 @@ class Movement:
             tilt = value
         elif self.action == "zoom":
             cam.zoom(value)
-            print(f"Zooming to {value}")
 
 class Focus:
     def __init__(self, action) -> None:
